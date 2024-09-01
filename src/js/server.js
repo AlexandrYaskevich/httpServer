@@ -1,179 +1,136 @@
-/* eslint-disable no-case-declarations */
-/* eslint-disable consistent-return */
-/* eslint-disable no-return-await */
+import express from "express";
+import cors from "cors";
+import bodyParser from "body-parser";
+import * as crypto from "crypto";
+import pino from 'pino';
+import pinoPretty from 'pino-pretty';
 
-const http = require('http');
-const Koa = require('koa');
-const cors = require('koa-cors');
-const koaBody = require('koa-body');
-const uuid = require('uuid');
+const app = express();
+const logger = pino(pinoPretty());
 
-const server = new Koa();
+app.use(cors());
+app.use(
+  bodyParser.json({
+    type(req) {
+      return true;
+    },
+  })
+);
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
 
 let tickets = [
   {
-    id: '123-456-789',
-    name: 'Test ticket with description',
-    description: 'This is a test ticket description',
-    status: true,
-    created: new Date().toLocaleString(),
+    id: crypto.randomUUID(),
+    name: "Поменять краску в принтере, ком. 404",
+    description: "Принтер HP LJ-1210, картриджи на складе",
+    status: false,
+    created: Date.now(),
   },
   {
-    id: '987-654-321',
-    name: 'Test ticket without description',
-    description: '',
+    id: crypto.randomUUID(),
+    name: "Переустановить Windows, PC-Hall24",
+    description: "",
     status: false,
-    created: new Date().toLocaleString(),
+    created: Date.now(),
+  },
+  {
+    id: crypto.randomUUID(),
+    name: "Установить обновление KB-31642dv3875",
+    description: "Вышло критическое обновление для Windows",
+    status: false,
+    created: Date.now(),
   },
 ];
 
-server.use(
-  cors({
-    origin: '*',
-    credentials: true,
-    'Access-Control-Allow-Origin': true,
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
-  })
-);
-
-
-server.use(
-  koaBody({
-    text: true,
-    urlencoded: true,
-    multipart: true,
-    json: true,
-  }),
-);
-
-server.use(async (ctx, next) => {
-  const origin = ctx.request.get('Origin');
-  if (!origin) {
-    return await next();
-  }
-
-  const headers = { 'Access-Control-Allow-Origin': '*' };
-
-  if (ctx.request.method !== 'OPTIONS') {
-    ctx.response.set({ ...headers });
-    try {
-      return await next();
-    } catch (e) {
-      e.headers = { ...e.headers, ...headers };
-      throw e;
-    }
-  }
-
-  if (ctx.request.get('Access-Control-Request-Method')) {
-    ctx.response.set({
-      ...headers,
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH',
-    });
-
-    if (ctx.request.get('Access-Control-Request-Headers')) {
-      ctx.response.set(
-        'Access-Control-Allow-Headers',
-        ctx.request.get('Access-Control-Request-Headers'),
-      );
-    }
-
-    ctx.response.status = 204;
-  }
-});
-
-server.use(async (ctx) => {
-  // console.log('request.query.method:', ctx.request.query.method);
-  // console.log('request.querystring:', ctx.request.querystring);
-  // console.log('request.body:', ctx.request.body);
-
-  // ctx.response.set({
-  //   'Access-Control-Allow-Origin': '*',
-  //   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-  //   'Access-Control-Allow-Headers': 'X-Secret, Content-Type'
-  // });
-
-  ctx.response.body = `server response at port ${port}`;
-  const { method } = ctx.request.query;
-  let process = null;
+app.use(async (request, response) => {
+  const { method, id } = request.query;
   switch (method) {
-    case 'GET':
-      process = ctx.request.query.process;
-      break
-    case 'POST':
-      process = ctx.request.body.process;
-      break
+    case "allTickets":
+      logger.info('All tickets has been called');
+      response.send(JSON.stringify(tickets)).end();
+      break;
+    case "ticketById": {
+      const ticket = tickets.find((ticket) => ticket.id === id);
+      if (!ticket) {
+        response
+          .status(404)
+          .send(JSON.stringify({ message: "Ticket not found" }))
+          .end();
+        break;
+      }
+      response.send(JSON.stringify(ticket)).end();
+      break;
+    }
+    case "createTicket": {
+      try {
+        const createData = request.body;
+        const newTicket = {
+          id: crypto.randomUUID(),
+          name: createData.name,
+          status: false,
+          description: createData.description || "",
+          created: Date.now(),
+        };
+        tickets.push(newTicket);
+        logger.info(`New ticket created: ${JSON.stringify(newTicket)}`);
+        response.send(JSON.stringify(newTicket)).end();
+      } catch (error) {
+        logger.error(`Error creating new ticket: ${error.message}`);
+        response.status(500).send(JSON.stringify({ error: error.message }));
+      }
+      break;
+    }
+    case "deleteById": {
+      const ticket = tickets.find((ticket) => ticket.id === id);
+      if (ticket) {
+        tickets = tickets.filter((ticket) => ticket.id !== id);
+        logger.info(`Ticket deleted: ${JSON.stringify(ticket)}`);
+        response.status(204).end();
+      } else {
+        logger.warn(`Ticket not found: ${id}`);
+        response
+          .status(404)
+          .send(JSON.stringify({ message: "Ticket not found" }))
+          .end();
+      }
+      break;
+    }
+    case "updateById": {
+      const ticket = tickets.find((ticket) => ticket.id === id);
+      const updateData = request.body;
+      if (ticket) {
+        Object.assign(ticket, updateData);
+        logger.info(`Ticket updated: ${JSON.stringify(ticket)}`);
+        response.send(JSON.stringify(tickets));
+      } else {
+        logger.warn(`Ticket not found: ${id}`);
+        response
+          .status(404)
+          .send(JSON.stringify({ message: "Ticket not found" }))
+          .end();
+      }
+      break;
+    }
     default:
-      ctx.response.status = 404;
-      return;
-  }
-
-  switch (process) {
-    case 'allTickets':
-      ctx.response.body = tickets;
-      // console.log('response.body:', ctx.response.body);
-      return;
-
-    case 'ticketById':
-      // console.log('request.query:', ctx.request.query);
-      // console.log('request.query.id:', ctx.request.query.id);
-      const ticketById = tickets.find((ticket) => ticket.id === ctx.request.query.id);
-      const ticketDescription = ticketById.description;
-      // console.log('ticketDescription:', ticketDescription);
-      ctx.response.body = ticketDescription;
-      // console.log('response.body:', ctx.response.body);
-      return;
-
-    case 'createTicket':
-      const newTicketId = uuid.v4()
-      const formData = ctx.request.body;
-      formData.id = newTicketId;
-      if (formData.status === 'false') formData.status = false;
-      if (formData.status === 'true') formData.status = true;
-      // console.log('formData.status:', formData.status, typeof formData.status);
-      tickets.push(formData);
-      // console.log('tickets:', tickets);
-      return;
-
-    case 'changeTicketStatus':
-      const ticketId = tickets.find((ticket) => ticket.id === ctx.request.body.id);
-      // console.log('request.body.id:', ctx.request.body.id);
-      if (!ticketId) return;
-      ticketId.status = ctx.request.body.status;
-      // console.log('ticketId:', ticketId);
-      // console.log('tickets:', tickets);
-      return;
-
-    case 'removeTicket':
-      // console.log('request.body.id:', ctx.request.body.id);
-      tickets = tickets.filter((ticket) => ticket.id !== ctx.request.body.id);
-      // console.log('tickets:', tickets);
-      return;
-
-    case 'editTicket':
-      const
-        {
-          id,
-          name,
-          description,
-          status,
-          created,
-        } = ctx.request.body;
-      // console.log('body:', id, name, description, status, created);
-
-      const editingTicket = tickets.find((ticket) => ticket.id === id);
-      if (!editingTicket) return;
-      editingTicket.name = name;
-      editingTicket.description = description;
-      editingTicket.status = status;
-      editingTicket.created = created;
-      // console.log('tickets:', tickets);
-      return;
-
-    default:
-      ctx.response.status = 404;
+      logger.warn(`Unknown method: ${method}`);
+      response.status(404).end();
+      break;
   }
 });
 
 const port = process.env.PORT || 7070;
 
-server.listen(port, () => console.log(`Koa server has been started on port ${port} ...`));
+const bootstrap = async () => {
+  try {
+    app.listen(port, () =>
+        logger.info(`Server has been started on http://localhost:${port}`)
+    );
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+bootstrap();
